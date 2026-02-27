@@ -7,6 +7,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import inch
 import pandas as pd
+import numpy as np
 import json
 from ..systemic.diagnostics import SystemicDiagnostics
 
@@ -60,6 +61,17 @@ class RunPDFBuilder:
 
         return table, page_size
 
+    def safe_json(self, v):
+        if isinstance(v, (np.integer,)):
+            return int(v)
+        if isinstance(v, (np.floating,)):
+            return float(v)
+        if isinstance(v, (np.bool_,)):
+            return bool(v)
+        if isinstance(v, (dict, list)):
+            return json.dumps(v, default=self.safe_json)
+        return v
+
     # --------------------------------------------------
     # Convert Dict to Table
     # --------------------------------------------------
@@ -69,7 +81,7 @@ class RunPDFBuilder:
         rows = [["Field", "Value"]]
         for k, v in data_dict.items():
             if isinstance(v, (dict, list)):
-                v = json.dumps(v)
+                v = self.safe_json(v)
             rows.append([k, v])
 
         return rows

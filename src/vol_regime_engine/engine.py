@@ -25,6 +25,15 @@ from .intraday.change_html_logger import IntradayChangeHTMLLogger
 from .middleware.run_aggregator import RunAggregator
 from .openinterest.oiwalls import compute_oi_walls
 from .systemic.convexity.engine import ConvexityEngine
+from .systemic.convexity_shock_engine  import (
+    ConvexityShockEngine,
+    ConvexityShockInputs,
+    StrikeGEX
+)
+from .systemic.flow_impact_monitor import (
+    FlowImpactMonitor,
+    FlowImpactInputs
+)
 from .futurestates.futures_state_engine import FuturesStateEngine
 from .scoring.regime_scorer import RegimeScorer
 from .indicators.atr import ATRCalculator
@@ -246,6 +255,111 @@ class VolRegimeEngine:
         }
 
         # ---------------------------------------
+        # 6.6️⃣ Flow Impact + Nonlinear Convexity Layer (SAFE ADD)
+        # ---------------------------------------
+
+        try:
+
+            # --- Build strike objects for systemic layer ---
+            strike_objects = [
+                StrikeGEX(strike=k, net_gex=v)
+                for k, v in gex_profile.items()
+            ]
+
+            # --- Estimate local GEX near spot ---
+            local_net_gex = sum(gex_profile.values())
+
+            # --- Estimate gradient safely ---
+            sorted_strikes = sorted(gex_profile.keys())
+            lower_strikes = [s for s in sorted_strikes if s <= current_spot]
+            upper_strikes = [s for s in sorted_strikes if s > current_spot]
+
+            if lower_strikes and upper_strikes:
+                lower = max(lower_strikes)
+                upper = min(upper_strikes)
+
+                dS = upper - lower
+                if dS != 0:
+                    gex_gradient = (
+                                           gex_profile.get(upper, 0) -
+                                           gex_profile.get(lower, 0)
+                                   ) / dS
+                else:
+                    gex_gradient = 0
+            else:
+                gex_gradient = 0
+
+            # --- Realized vol proxy ---
+            daily_realized_vol = current_hv / 100 if current_hv else 0.01
+
+            # --- Futures volume proxy (safe fallback) ---
+            daily_futures_volume = max(
+                future_ohlc[list(future_ohlc.keys())[0]][
+                    list(future_ohlc[list(future_ohlc.keys())[0]].keys())[0]
+                ]["volume"].sum(),
+                1
+            )
+
+            baseline_impact_k = 1e-7  # configurable baseline
+
+            # ------------------------------------------------
+            # Flow Impact Monitor
+            # ------------------------------------------------
+
+            flow_monitor = FlowImpactMonitor()
+
+            flow_result = flow_monitor.evaluate(
+                FlowImpactInputs(
+                    net_gex=local_net_gex,
+                    gex_gradient=gex_gradient,
+                    exogenous_flow=0,  # no live imbalance in batch run
+                    daily_realized_vol=daily_realized_vol,
+                    daily_futures_volume=daily_futures_volume,
+                    fragility_score=state["convexity"]["convexity_instability"] * 100,
+                    baseline_impact_k=baseline_impact_k
+                )
+            )
+
+            # ------------------------------------------------
+            # Nonlinear Convexity Shock Engine
+            # ------------------------------------------------
+            atr_calc = ATRCalculator(lookback=5, method="ema")
+
+            result = atr_calc.latest_atr_values(spot_history)
+
+            shock_engine = ConvexityShockEngine()
+
+            shock_result = shock_engine.compute(
+                ConvexityShockInputs(
+                    spot=current_spot,
+                    strikes=strike_objects,
+                    lot_size=self.lot_size,
+                    atr_points=state.get("atr_pct", 1) * current_spot / 100,
+                    flip_level=gamma_flip,
+                    fragility_score=state["convexity"]["convexity_instability"] * 100,
+                    daily_realized_vol=daily_realized_vol,
+                    daily_futures_volume=daily_futures_volume,
+                    baseline_impact_k=baseline_impact_k,
+                    shock_percent=0.02,
+                    notional_shock_rupees=10_000 * 1e7,  # ₹10,000 Cr,
+                    target_percent_move = result["atr_pct"] / 100  # 1% move
+                )
+            )
+
+            state["systemic"] = {
+                "flow_impact": flow_result,
+                "convexity_shock": shock_result
+            }
+
+        except Exception as e:
+
+            state["systemic"] = {
+                "flow_impact": {},
+                "convexity_shock": {},
+                "error": str(e)
+            }
+
+        # ---------------------------------------
         # 7️⃣ Strategy Selection
         # ---------------------------------------
 
@@ -312,9 +426,7 @@ class VolRegimeEngine:
         # 8️⃣ Regime Scoring
         # ---------------------------------------
 
-        atr_calc = ATRCalculator(lookback=5, method="ema")
 
-        result = atr_calc.latest_atr_values(spot_history)
 
         state["atr_pct"] = result["atr_pct"]
         scale_estimator = SimpleGEXScale(alpha=2.0, min_scale=1e8)
@@ -357,7 +469,8 @@ class VolRegimeEngine:
         # ---------------------------------------
         if chatgpt:
             # OpenAI client (uses env variable)
-            client = OpenAI()
+            client = OpenAI(
+                api_key="")
 
             response = client.responses.create(
                 model="gpt-5",
