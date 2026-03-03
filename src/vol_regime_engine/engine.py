@@ -25,7 +25,7 @@ from .intraday.change_html_logger import IntradayChangeHTMLLogger
 from .middleware.run_aggregator import RunAggregator
 from .openinterest.oiwalls import compute_oi_walls
 from .systemic.convexity.engine import ConvexityEngine
-from .systemic.convexity_shock_engine  import (
+from .systemic.convexity_shock_engine import (
     ConvexityShockEngine,
     ConvexityShockInputs,
     StrikeGEX
@@ -39,6 +39,8 @@ from .scoring.regime_scorer import RegimeScorer
 from .indicators.atr import ATRCalculator
 from .core.engine_state import EngineState
 from .scaling.simple_gex_scale import SimpleGEXScale
+from .candlestick_engine.candlestick_engine import CandlestickEngine
+from .quantpriceaction.quantpriceaction import QuantPriceAction
 from vol_regime_engine.adaptive_signal_engine.engine import run_adaptive_signal_engine
 from vol_regime_engine.adaptive_signal_engine.engine import run_adaptive_signal_engine
 from vol_regime_engine.adaptive_signal_engine.logging.run_logger import AdaptiveRunLogger
@@ -116,6 +118,16 @@ class VolRegimeEngine:
 
         nearest_df = list(option_chains.values())[0]
         nearest_expiry = nearest_df.iloc[0]["expiry_date"]
+
+        candlestick_engine = CandlestickEngine()
+        candle_pattern_result = candlestick_engine.run(spot_history)
+
+        pattern_engine = QuantPriceAction(device="cpu")
+        pattern_engine.load(spot_history["close"])
+
+        results = pattern_engine.detect()
+
+        print(results)
 
         current_iv = get_atm_iv(
             nearest_df,
@@ -196,17 +208,21 @@ class VolRegimeEngine:
         # ---------------------------------------
 
         state = {
+            "underlying": underlying,
             "gamma_surface_regime": gamma_surface,
             "vega_regime": vega_state,
             "theta_regime": theta_state,
+            "candle_pattern": candle_pattern_result,
             "iv_vs_hv": iv_hv_state,
             "iv": current_iv,
             "hv": current_hv,
+            "current_spot": current_spot,
+            "recent_high": spot_history["high"].iloc[-1],
+            "recent_low": spot_history["low"].iloc[-1],
             "gamma_flip": gamma_flip,
             "call_wall": call_wall,
             "put_wall": put_wall,
-            "recent_high": spot_history["high"].iloc[-1],
-            "recent_low": spot_history["low"].iloc[-1],
+
             "instability_pockets": instability,
             "convexity_traps": convexity,
             "skew_regime": skew_regime,
@@ -214,8 +230,8 @@ class VolRegimeEngine:
             "surface_change": surface_change,
             "skew_change_regime": skew_change_regime,
             "surface_shift_regime": surface_shift_regime,
-            "current_spot": current_spot,
-            "underlying": underlying
+
+
         }
         adaptive_output = run_adaptive_signal_engine(state)
 
@@ -342,7 +358,7 @@ class VolRegimeEngine:
                     baseline_impact_k=baseline_impact_k,
                     shock_percent=0.02,
                     notional_shock_rupees=10_000 * 1e7,  # ₹10,000 Cr,
-                    target_percent_move = result["atr_pct"] / 100  # 1% move
+                    target_percent_move=result["atr_pct"] / 100  # 1% move
                 )
             )
 
@@ -426,8 +442,6 @@ class VolRegimeEngine:
         # 8️⃣ Regime Scoring
         # ---------------------------------------
 
-
-
         state["atr_pct"] = result["atr_pct"]
         scale_estimator = SimpleGEXScale(alpha=2.0, min_scale=1e8)
         gex_scale = scale_estimator.compute_scale(option_chains)
@@ -459,10 +473,7 @@ class VolRegimeEngine:
             print("Regime scoring failed:", e)
             result = {"regime_score": 0, "strategy_bias": "NEUTRAL_OPTIONALITY_SMALL_SIZE"}
 
-        state["regime_score"]= result
-
-
-
+        state["regime_score"] = result
 
         # ---------------------------------------
         # 8️⃣ LLM Interpretation (optional)

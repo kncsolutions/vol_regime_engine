@@ -1,0 +1,15 @@
+
+    [build-system]
+    requires = ["setuptools", "wheel"]
+    build-backend = "setuptools.build_meta"
+    
+    [project]
+    name = "quantpriceaction"
+    version = "0.1.0"
+    description = "GPU Accelerated Quantitative Chart Pattern Detection Engine"
+    authors = [{name="Pallav Nandi Chaudhuri"}]
+    dependencies = ["numpy", "pandas", "torch"]
+    
+    [tool.setuptools.packages.find]
+    where = ["."]
+    

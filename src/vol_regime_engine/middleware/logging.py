@@ -79,6 +79,7 @@ class EngineLogger:
         chatgpt_response = payload.get("chatgpt_response", "")
         option_chains = payload.get("option_chains", {})
         timestamp = payload.get("timestamp_utc")
+        underlying = regime_state["underlying"]
         ist_timestamp = self.to_ist(timestamp)
 
         html = f"""
@@ -97,7 +98,7 @@ class EngineLogger:
         <body>
         
 
-        <h1>Volatility Regime Snapshot</h1>
+        <h1>Volatility Regime Snapshot-{underlying}</h1>
         <div class="meta">        
             Timestamp: {ist_timestamp} <br>"
             Engine Version: {self.engine_version}

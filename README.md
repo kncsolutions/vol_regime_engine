@@ -10,6 +10,42 @@ cross-asset fragility, and volatility surface shifts.
 - Early Crash Warning Signals
 - State Transition Modeling
 
+## Understanding Terminology
+### Regime_score
+$$
+Γ=∂^2v/ds^2
+$$
+Aggregate dealer gamma exposure (GEX):
+$$
+GEX(S)=∑iΓi(S)⋅OIi⋅ContractSize
+$$
+$$
+GEX(S)=
+i
+∑
+	​
+
+Γ
+i
+	​
+
+(S)⋅OI
+i
+	​
+
+⋅ContractSize
+
+Your normalized gamma score likely resembles:
+
+GammaScore=GEX∣GEX∣+λ
+GammaScore=
+∣GEX∣+λ
+GEX
+	​
+
+
+or a z-score of GEX.
+
 ## Installation
 
 ```bash
