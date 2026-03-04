@@ -122,12 +122,12 @@ class VolRegimeEngine:
         candlestick_engine = CandlestickEngine()
         candle_pattern_result = candlestick_engine.run(spot_history)
 
-        pattern_engine = QuantPriceAction(device="cpu")
-        pattern_engine.load(spot_history["close"])
-
-        results = pattern_engine.detect()
-
-        print(results)
+        # pattern_engine = QuantPriceAction(device="cpu")
+        # pattern_engine.load(spot_history["close"])
+        #
+        # results = pattern_engine.detect()
+        #
+        # print(results)
 
         current_iv = get_atm_iv(
             nearest_df,
@@ -352,6 +352,11 @@ class VolRegimeEngine:
                     lot_size=self.lot_size,
                     atr_points=state.get("atr_pct", 1) * current_spot / 100,
                     flip_level=gamma_flip,
+                    net_gex=local_net_gex,
+                    gex_gradient=gex_gradient,
+                    impact_coefficient_k=flow_result["impact_coefficient_k"],
+                    call_wall=call_wall,
+                    put_wall=put_wall,
                     fragility_score=state["convexity"]["convexity_instability"] * 100,
                     daily_realized_vol=daily_realized_vol,
                     daily_futures_volume=daily_futures_volume,

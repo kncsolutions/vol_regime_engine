@@ -16,6 +16,7 @@ Features:
 from dataclasses import dataclass
 from typing import List, Dict
 import numpy as np
+from ..systemic.convexity.GammaPressureMap import GammaPressureMap
 
 
 # ======================================================
@@ -27,6 +28,25 @@ class StrikeGEX:
     strike: float
     net_gex: float
 
+ZONE_MULTIPLIER = {
+    "DEEP_LONG_GAMMA": 0.3,
+    "LONG_GAMMA": 0.6,
+    "FLIP_ZONE": 1.2,
+    "SHORT_GAMMA": 1.8,
+    "DEEP_SHORT_GAMMA": 2.5,
+    "ONE_SIDED_GAMMA": 1.0,
+    "UNKNOWN": 1.0
+}
+
+PRESSURE_MULTIPLIER = {
+    "PUT_SUPPORT": 0.4,
+    "LONG_GAMMA_RANGE": 0.7,
+    "SHORT_GAMMA_RANGE": 1.5,
+    "CALL_SQUEEZE": 2.5,
+    "ONE_SIDED_GAMMA": 1.0,
+    "UNKNOWN": 1.0
+}
+
 
 @dataclass
 class ConvexityShockInputs:
@@ -35,7 +55,12 @@ class ConvexityShockInputs:
     lot_size: int
     atr_points: float
     flip_level: float
+    net_gex: float
+    gex_gradient: float
     fragility_score: float
+    put_wall:float
+    call_wall:float
+
 
     daily_realized_vol: float
     daily_futures_volume: float
@@ -46,6 +71,7 @@ class ConvexityShockInputs:
     nonlinear_steps: int = 2
     notional_shock_rupees: float = None  # NEW
     target_percent_move: float = None  # NEW
+    impact_coefficient_k: float = 0.0000000000000001
 
 
 # ======================================================
@@ -89,13 +115,34 @@ class ConvexityShockEngine:
     # --------------------------------------------------
     # Gamma zone classification
     # --------------------------------------------------
-    def _gamma_zone(self,
-                    price: float,
-                    flip_level: float) -> str:
+    def _gamma_zone(self, price, flip_level, band_pct=0.005):
 
-        if price >= flip_level:
-            return "DEALER_LONG_GAMMA_ZONE"
-        return "DEALER_SHORT_GAMMA_ZONE"
+        if price is None:
+            return "UNKNOWN"
+
+        if flip_level is None:
+            return "ONE_SIDED_GAMMA"
+
+        band = flip_level * band_pct
+
+        lower = flip_level - band
+        upper = flip_level + band
+        deep_short = flip_level + 2 * band
+
+        if price < lower:
+            return "DEEP_LONG_GAMMA"
+
+        elif price < flip_level:
+            return "LONG_GAMMA"
+
+        elif price <= upper:
+            return "FLIP_ZONE"
+
+        elif price <= deep_short:
+            return "SHORT_GAMMA"
+
+        else:
+            return "DEEP_SHORT_GAMMA"
 
     # --------------------------------------------------
     # Linear hedge estimate
@@ -327,6 +374,39 @@ class ConvexityShockEngine:
         }
 
     # --------------------------------------------------
+    # Computation of gamma zones
+    # --------------------------------------------------
+
+    def _gamma_zone_range(self, price, flip_level, band_pct=0.005):
+
+        if price is None:
+            return "UNKNOWN"
+
+        if flip_level is None:
+            return "ONE_SIDED_GAMMA"
+
+        band = flip_level * band_pct
+
+        lower = flip_level - band
+        upper = flip_level + band
+        deep_short = flip_level + 2 * band
+
+        if price < lower:
+            return "DEEP_LONG_GAMMA"
+
+        elif price < flip_level:
+            return "LONG_GAMMA"
+
+        elif price <= upper:
+            return "FLIP_ZONE"
+
+        elif price <= deep_short:
+            return "SHORT_GAMMA"
+
+        else:
+            return "DEEP_SHORT_GAMMA"
+
+    # --------------------------------------------------
     # Public Interface
     # --------------------------------------------------
     def compute(self, inputs: ConvexityShockInputs) -> Dict:
@@ -369,8 +449,15 @@ class ConvexityShockEngine:
             inputs.flip_level
         )
 
+
+
         post_shock_zone = self._gamma_zone(
             inputs.spot + shock_points,
+            inputs.flip_level
+        )
+
+        current_zone_range = self._gamma_zone(
+            inputs.spot,
             inputs.flip_level
         )
 
@@ -382,6 +469,16 @@ class ConvexityShockEngine:
             inputs.daily_realized_vol,
             inputs.daily_futures_volume
         )
+
+        zone_multiplier = ZONE_MULTIPLIER.get(current_zone, 1.0)
+        base_amplification = abs(inputs.net_gex) / 1e9
+        liquidity_fragility = k_current
+        shock_score = (
+                base_amplification
+                * liquidity_fragility
+                * zone_multiplier
+        )
+        amplification = inputs.impact_coefficient_k * abs(inputs.gex_gradient)
 
         dynamic_threshold = self._dynamic_threshold(
             base_threshold=1.5,
@@ -449,6 +546,18 @@ class ConvexityShockEngine:
             gex_gradient=gex_gradient
         )
 
+        pressure_map = GammaPressureMap(
+            inputs.put_wall,
+            inputs.flip_level,
+            inputs.call_wall
+        )
+
+        gamma_pressure_zone = pressure_map.zone(inputs.spot)
+
+        pressure_multiplier = PRESSURE_MULTIPLIER[gamma_pressure_zone]
+
+        shock_score *= pressure_multiplier
+
 
 
         # --------------------------------------------------
@@ -468,7 +577,14 @@ class ConvexityShockEngine:
 
             "gamma_zones": {
                 "current_zone": current_zone,
-                "post_shock_zone": post_shock_zone
+                "post_shock_zone": post_shock_zone,
+                "zone_multiplier": zone_multiplier,
+                "shock_score": shock_score,
+                "amplification": amplification,
+                "gamma_pressure_zone": gamma_pressure_zone,
+                "put_wall": inputs.put_wall,
+                "gamma_flip": inputs.flip_level,
+                "call_wall": inputs.call_wall,
             },
 
             "linear_hedge": {
