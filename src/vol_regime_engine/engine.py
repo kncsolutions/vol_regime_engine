@@ -41,6 +41,12 @@ from .core.engine_state import EngineState
 from .scaling.simple_gex_scale import SimpleGEXScale
 from .candlestick_engine.candlestick_engine import CandlestickEngine
 from .quantpriceaction.quantpriceaction import QuantPriceAction
+from .convexity_dashboard.engine.loader import load_json
+from .convexity_dashboard.engine.scoring import convexity_score
+from .convexity_dashboard.engine.opportunity_filter import filter_opportunities
+from .convexity_dashboard.engine.trade_classifier import classify_trade
+from .convexity_dashboard.engine.market_state import classify_market_state
+from .convexity_dashboard.dashboard.dashboard import create_dashboard, save_dashboard_html
 from vol_regime_engine.adaptive_signal_engine.engine import run_adaptive_signal_engine
 from vol_regime_engine.adaptive_signal_engine.engine import run_adaptive_signal_engine
 from vol_regime_engine.adaptive_signal_engine.logging.run_logger import AdaptiveRunLogger
@@ -230,7 +236,6 @@ class VolRegimeEngine:
             "surface_change": surface_change,
             "skew_change_regime": skew_change_regime,
             "surface_shift_regime": surface_shift_regime,
-
 
         }
         adaptive_output = run_adaptive_signal_engine(state)
@@ -525,6 +530,37 @@ class VolRegimeEngine:
     def log_finalize(self):
         run_path = self.aggregator.finalize()
         print("Run saved at:", run_path)
+        json_path_str = str(run_path["json_path"])
+        self.run_pipeline(json_path_str)
+
+    def run_pipeline(self, json_file):
+        print("Loading opportunity data...")
+        df = load_json(json_file)
+        print("Computing convexity scores...")
+        df, simulations  = convexity_score(df)
+        print("Filtering opportunities...")
+        df = filter_opportunities(df)
+        print("Classifying trades...")
+        df["trade"] = df.apply(classify_trade, axis=1)
+
+        print("Classifying market state...")
+        df["market_state"] = df["acceleration"].apply(classify_market_state)
+        print("Top Opportunities:")
+        print(
+            df[[
+                "symbol",
+                "gamma_regime",
+                "bias",
+                "acceleration",
+                "convexity_score",
+                "trade"
+            ]].head(10)
+        )
+        print("Starting dashboard...")
+        app, figures = create_dashboard(df, simulations)
+
+        save_dashboard_html(figures, json_file)
+        # app.run(debug=True)
 
     # =========================================================
     # Intraday Monitor
