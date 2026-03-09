@@ -310,23 +310,43 @@ def create_dashboard(df, simulations=None):
             sort_action="native",
             page_size=20,
 
-            style_table={"overflowX": "auto"},
+            style_table={
+                "overflowX": "auto",
+                "marginTop": "20px"
+            },
+
+            style_header={
+                "backgroundColor": "#222",
+                "color": "white",
+                "fontWeight": "bold"
+            },
+
+            style_cell={
+                "backgroundColor": "#111",
+                "color": "#e6e6e6",
+                "border": "1px solid #333",
+                "padding": "6px",
+                "textAlign": "left"
+            },
 
             style_data_conditional=[
 
                 {
                     "if": {"filter_query": "{gamma_regime} = short_gamma"},
-                    "backgroundColor": "#2b0000"
+                    "backgroundColor": "#2b0000",
+                    "color": "white"
                 },
 
                 {
                     "if": {"filter_query": "{gamma_regime} = flip_zone"},
-                    "backgroundColor": "#3d3200"
+                    "backgroundColor": "#3d3200",
+                    "color": "white"
                 },
 
                 {
                     "if": {"filter_query": "{gamma_regime} = long_gamma"},
-                    "backgroundColor": "#001f33"
+                    "backgroundColor": "#001f33",
+                    "color": "white"
                 }
 
             ]

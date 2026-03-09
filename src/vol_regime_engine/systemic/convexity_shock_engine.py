@@ -58,8 +58,10 @@ class ConvexityShockInputs:
     net_gex: float
     gex_gradient: float
     fragility_score: float
+    impact_coefficient_k_baseline: float
     put_wall:float
     call_wall:float
+    avg_daily_notional :float
 
 
     daily_realized_vol: float
@@ -71,7 +73,7 @@ class ConvexityShockInputs:
     nonlinear_steps: int = 2
     notional_shock_rupees: float = None  # NEW
     target_percent_move: float = None  # NEW
-    impact_coefficient_k: float = 0.0000000000000001
+    impact_coefficient_k: float = 1e-7
 
 
 # ======================================================
@@ -465,25 +467,46 @@ class ConvexityShockEngine:
         # FULL PRODUCTION CRASH CONDITION
         # --------------------------------------------------
         # --- Compute liquidity ---
-        k_current = self._compute_k(
-            inputs.daily_realized_vol,
-            inputs.daily_futures_volume
-        )
+        if inputs.impact_coefficient_k:
+            k_current = inputs.impact_coefficient_k
+        else:
+            k_current = self._compute_k(
+                inputs.daily_realized_vol,
+                inputs.daily_futures_volume
+            )
+        if inputs.impact_coefficient_k_baseline:
+            k_baseline = inputs.impact_coefficient_k_baseline
+        else:
+            k_baseline = inputs.baseline_impact_k
 
         zone_multiplier = ZONE_MULTIPLIER.get(current_zone, 1.0)
-        base_amplification = abs(inputs.net_gex) / 1e9
-        liquidity_fragility = k_current
-        shock_score = (
-                base_amplification
-                * liquidity_fragility
-                * zone_multiplier
+        # gamma relative to liquidity
+        base_amplification = abs(inputs.net_gex) / inputs.avg_daily_notional
+        # liquidity fragility
+        liquidity_fragility = (
+                k_current / k_baseline
         )
-        amplification = inputs.impact_coefficient_k * abs(inputs.gex_gradient)
+
+        # convexity instability score
+        shock_score = base_amplification * liquidity_fragility
+        # liquidity_fragility = k_current
+        # shock_score = (
+        #         base_amplification
+        #         * liquidity_fragility
+        #         * zone_multiplier
+        # )
+        # amplification = inputs.impact_coefficient_k * abs(inputs.gex_gradient)
+        # convexity acceleration
+        amplification = (
+                k_current
+                * abs(inputs.gex_gradient)
+                * inputs.spot
+        )
 
         dynamic_threshold = self._dynamic_threshold(
             base_threshold=1.5,
             k_current=k_current,
-            k_baseline=inputs.baseline_impact_k
+            k_baseline=k_baseline
         )
 
         crash_acceleration = (
