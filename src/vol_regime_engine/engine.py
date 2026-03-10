@@ -1,7 +1,9 @@
 from openai import OpenAI
-
+import pandas as pd
+import numpy as np
+from datetime import datetime
 from .gamma.gex import calculate_gex
-from .gamma.gamma_gradient import  estimate_gradient
+from .gamma.gamma_gradient import estimate_gradient
 from .gamma.gamma_flip import identify_gamma_flip
 from .gamma.instability import detect_instability
 from .gamma.convexity import detect_convexity_traps
@@ -41,6 +43,10 @@ from .indicators.atr import ATRCalculator
 from .indicators.convexity_shock_percent import convexity_shock_percent
 from .core.engine_state import EngineState
 from .scaling.simple_gex_scale import SimpleGEXScale
+from .db_read_write.firebase_metric_writer import FirebaseMetricWriter
+
+
+
 from .candlestick_engine.candlestick_engine import CandlestickEngine
 from .quantpriceaction.quantpriceaction import QuantPriceAction
 from .convexity_dashboard.engine.loader import load_json
@@ -61,7 +67,7 @@ from screening.acceleration_model import AccelerationProbabilityModel
 
 class VolRegimeEngine:
 
-    def __init__(self, lot_size: int = 65, enable_logging=True):
+    def __init__(self, lot_size: int = 65, db_cred=False, enable_logging=True):
 
         self.lot_size = lot_size
 
@@ -73,6 +79,16 @@ class VolRegimeEngine:
         self.vol_store = VolatilityStructureStore()
         self.skew_classifier = SkewRegimeClassifier()
         self.vol_dynamics = VolatilityDynamics()
+
+        # DB operations
+        if db_cred:
+            self.db_cred = db_cred['service_account_cred']
+            self.db_path = db_cred['db_path']
+            self.writer = FirebaseMetricWriter(
+                self.db_cred,
+                self.db_path
+            )
+
 
         # Logging
         self.enable_logging = enable_logging
@@ -299,7 +315,6 @@ class VolRegimeEngine:
 
             gex_gradient = estimate_gradient(current_spot, nearest_df, 0.03)
 
-
             # --- Realized vol proxy ---
             daily_realized_vol = current_hv / 100 if current_hv else 0.01
 
@@ -313,10 +328,10 @@ class VolRegimeEngine:
 
             adv_notional = max(
                 (future_ohlc[list(future_ohlc.keys())[0]][
-                    list(future_ohlc[list(future_ohlc.keys())[0]].keys())[0]
-                ]["close"] * future_ohlc[list(future_ohlc.keys())[0]][
-                    list(future_ohlc[list(future_ohlc.keys())[0]].keys())[0]
-                ]["volume"]).sum() / future_ohlc[list(future_ohlc.keys())[0]][
+                     list(future_ohlc[list(future_ohlc.keys())[0]].keys())[0]
+                 ]["close"] * future_ohlc[list(future_ohlc.keys())[0]][
+                     list(future_ohlc[list(future_ohlc.keys())[0]].keys())[0]
+                 ]["volume"]).sum() / future_ohlc[list(future_ohlc.keys())[0]][
                     list(future_ohlc[list(future_ohlc.keys())[0]].keys())[0]
                 ]["datetime"].nunique(),
                 1
@@ -329,7 +344,6 @@ class VolRegimeEngine:
             # ------------------------------------------------
 
             flow_monitor = FlowImpactMonitor()
-
 
             flow_result = flow_monitor.evaluate(
                 FlowImpactInputs(
@@ -357,7 +371,9 @@ class VolRegimeEngine:
 
             shock_engine = ConvexityShockEngine()
             shock_ratio, shock_percent = convexity_shock_percent(future_ohlc[list(future_ohlc.keys())[0]][
-                        list(future_ohlc[list(future_ohlc.keys())[0]].keys())[-2]]["close"])
+                                                                     list(future_ohlc[
+                                                                              list(future_ohlc.keys())[0]].keys())[-2]][
+                                                                     "close"])
 
             shock_result = shock_engine.compute(
                 ConvexityShockInputs(
@@ -532,6 +548,9 @@ class VolRegimeEngine:
                 state
             )
 
+        if self.db_cred:
+            self.initiate_db_write(state, nearest_df)
+
         return {
             "state": state,
             "strategies": strategy_outputs,
@@ -687,3 +706,28 @@ class VolRegimeEngine:
                 "transition_matrix": futures_output["transition_matrix"]
             }
         }
+
+    def initiate_db_write(self, state, latest_option_chain):
+        latest_option_chain = latest_option_chain[
+            (latest_option_chain["call_oi"] > 0) | (latest_option_chain["put_oi"] > 0)
+            ]
+
+        option_chain = latest_option_chain.replace(
+            [np.nan, np.inf, -np.inf], None
+        ).to_dict("records")
+
+        self.writer.upload_metrics(
+            stock_id=state["underlying"],
+            iv=state["iv"],
+            hv=state["hv"],
+            spot=state["current_spot"],
+            gamma_flip=state["gamma_flip"],
+            k=state["systemic"]["flow_impact"]["impact_coefficient_k"],
+            I1=state["systemic"]["flow_impact"]["linear_instability_I1"],
+            I2=state["systemic"]["flow_impact"]["convexity_instability_I2"],
+            amplification=state["systemic"]["flow_impact"]["amplification_factor"],
+            bifurcation_proximity_ratio=state["systemic"]["flow_impact"]["bifurcation_proximity_ratio"],
+            gamma_zones=state["systemic"]["convexity_shock"]["gamma_zones"],
+            fragility_score = getattr(state["regime_score"], "fragility_score", None),
+            option_chain=option_chain
+        )
