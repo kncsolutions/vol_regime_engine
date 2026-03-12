@@ -45,8 +45,6 @@ from .core.engine_state import EngineState
 from .scaling.simple_gex_scale import SimpleGEXScale
 from .db_read_write.firebase_metric_writer import FirebaseMetricWriter
 
-
-
 from .candlestick_engine.candlestick_engine import CandlestickEngine
 from .quantpriceaction.quantpriceaction import QuantPriceAction
 from .convexity_dashboard.engine.loader import load_json
@@ -88,7 +86,6 @@ class VolRegimeEngine:
                 self.db_cred,
                 self.db_path
             )
-
 
         # Logging
         self.enable_logging = enable_logging
@@ -547,6 +544,10 @@ class VolRegimeEngine:
                 underlying,
                 state
             )
+            print(future_ohlc[list(future_ohlc.keys())[0]][
+                      list(future_ohlc[
+                               list(future_ohlc.keys())[0]].keys())[0]])
+            # input('wait')
 
         if self.db_cred:
             self.initiate_db_write(state, nearest_df)
@@ -727,7 +728,8 @@ class VolRegimeEngine:
             I2=state["systemic"]["flow_impact"]["convexity_instability_I2"],
             amplification=state["systemic"]["flow_impact"]["amplification_factor"],
             bifurcation_proximity_ratio=state["systemic"]["flow_impact"]["bifurcation_proximity_ratio"],
+            gex_gradient=state["systemic"]["convexity_shock"]["bifurcation_analysis"]["gex_gradient"],
             gamma_zones=state["systemic"]["convexity_shock"]["gamma_zones"],
-            fragility_score = getattr(state["regime_score"], "fragility_score", None),
+            fragility_score=getattr(state["regime_score"], "fragility_score", None),
             option_chain=option_chain
         )

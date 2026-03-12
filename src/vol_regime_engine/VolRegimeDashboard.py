@@ -58,7 +58,12 @@ class VolRegimeDashboard:
             return pd.DataFrame(), None
 
         df = pd.DataFrame(data).T
-        df.index = pd.to_datetime(df.index.astype(int), unit="s")
+        df.index = (
+            pd.to_datetime(df.index.astype(int), unit="s")
+            .tz_localize("UTC")
+            .tz_convert("Asia/Kolkata")
+            .tz_localize(None)
+        )
         df = df.sort_index()
 
         if "gamma_zones" in df.columns:
@@ -556,7 +561,7 @@ class VolRegimeDashboard:
             else:
                 regime_color = "#aaaaaa"
 
-            last_update = str(df.index[-1])
+            last_update = df.index[-1].strftime("%Y-%m-%d %H:%M:%S IST")
             banner = [
 
                 html.Div(

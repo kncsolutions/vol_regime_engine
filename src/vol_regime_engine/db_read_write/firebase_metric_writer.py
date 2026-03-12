@@ -1,10 +1,10 @@
 import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import db
-from datetime import datetime
+from datetime import datetime, timezone
 import pandas as pd
 import numpy as np
-from .sanitizer import sanitize,clean_scalar
+from .sanitizer import sanitize, clean_scalar
 
 
 class FirebaseMetricWriter:
@@ -22,10 +22,6 @@ class FirebaseMetricWriter:
 
         self.root_ref = db.reference("/")
 
-
-
-
-
     def upload_metrics(
             self,
             stock_id: str,
@@ -38,11 +34,12 @@ class FirebaseMetricWriter:
             I2: float,
             amplification: float,
             bifurcation_proximity_ratio: float,
+            gex_gradient: float,
             gamma_zones: dict,
             fragility_score: float,
             option_chain: pd.DataFrame
     ):
-        timestamp = int(datetime.utcnow().timestamp())
+        timestamp = int(datetime.now(timezone.utc).timestamp())
 
         ts = str(timestamp)
 
@@ -60,6 +57,7 @@ class FirebaseMetricWriter:
             "convexity_instability_I2": I2,
             "amplification_factor": amplification,
             "bifurcation_proximity_ratio": bifurcation_proximity_ratio,
+            "gex_gradient": gex_gradient,
             "gamma_zones": gamma_zones,
             "fragility_score": fragility_score,
             "option_chain": option_chain
