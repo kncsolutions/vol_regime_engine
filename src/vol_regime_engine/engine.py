@@ -550,7 +550,7 @@ class VolRegimeEngine:
             # input('wait')
 
         if self.db_cred:
-            self.initiate_db_write(state, nearest_df)
+            self.initiate_db_write(state, lot_size=lot_size, latest_option_chain=nearest_df)
 
         return {
             "state": state,
@@ -708,7 +708,7 @@ class VolRegimeEngine:
             }
         }
 
-    def initiate_db_write(self, state, latest_option_chain):
+    def initiate_db_write(self, state, lot_size, latest_option_chain):
         latest_option_chain = latest_option_chain[
             (latest_option_chain["call_oi"] > 0) | (latest_option_chain["put_oi"] > 0)
             ]
@@ -731,5 +731,6 @@ class VolRegimeEngine:
             gex_gradient=state["systemic"]["convexity_shock"]["bifurcation_analysis"]["gex_gradient"],
             gamma_zones=state["systemic"]["convexity_shock"]["gamma_zones"],
             fragility_score=getattr(state["regime_score"], "fragility_score", None),
+            lot_size=lot_size,
             option_chain=option_chain
         )

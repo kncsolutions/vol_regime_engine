@@ -37,6 +37,7 @@ class FirebaseMetricWriter:
             gex_gradient: float,
             gamma_zones: dict,
             fragility_score: float,
+            lot_size: int,
             option_chain: pd.DataFrame
     ):
         timestamp = int(datetime.now(timezone.utc).timestamp())
@@ -60,6 +61,7 @@ class FirebaseMetricWriter:
             "gex_gradient": gex_gradient,
             "gamma_zones": gamma_zones,
             "fragility_score": fragility_score,
+            "lot_size":lot_size,
             "option_chain": option_chain
         }
 
