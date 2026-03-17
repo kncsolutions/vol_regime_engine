@@ -2,6 +2,8 @@ from openai import OpenAI
 import pandas as pd
 import numpy as np
 from datetime import datetime
+
+
 from .gamma.gex import calculate_gex
 from .gamma.gamma_gradient import estimate_gradient
 from .gamma.gamma_flip import identify_gamma_flip
@@ -44,6 +46,7 @@ from .indicators.convexity_shock_percent import convexity_shock_percent
 from .core.engine_state import EngineState
 from .scaling.simple_gex_scale import SimpleGEXScale
 from .db_read_write.firebase_metric_writer import FirebaseMetricWriter
+# from .db_read_write.firebase_regime_state_writer import FirebaseRegimeStateWriter
 
 from .candlestick_engine.candlestick_engine import CandlestickEngine
 from .quantpriceaction.quantpriceaction import QuantPriceAction
@@ -549,8 +552,33 @@ class VolRegimeEngine:
                                list(future_ohlc.keys())[0]].keys())[0]])
             # input('wait')
 
+        def convert_numpy(obj):
+            if isinstance(obj, np.generic):
+                return obj.item()
+            return obj
+
+        def convert_all(obj):
+            if isinstance(obj, pd.DataFrame):
+                return obj.to_dict(orient="records")
+            elif isinstance(obj, pd.Series):
+                return obj.to_dict()
+            elif isinstance(obj, dict):
+                return {k: convert_all(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_all(i) for i in obj]
+            elif isinstance(obj, np.generic):
+                return obj.item()
+            else:
+                return obj
+
         if self.db_cred:
             self.initiate_db_write(state, lot_size=lot_size, latest_option_chain=nearest_df)
+            self.initiate_db_regime_state_write(
+                option_chains=convert_all(option_chains),
+                spot_history=convert_all(spot_history.tail(1)),
+                regime_state=convert_all(state),
+                strategy_outputs=convert_all(strategy_outputs),
+                lot_size=lot_size)
 
         return {
             "state": state,
@@ -734,3 +762,19 @@ class VolRegimeEngine:
             lot_size=lot_size,
             option_chain=option_chain
         )
+
+    def initiate_db_regime_state_write(
+            self,
+            option_chains,
+            spot_history,
+            strategy_outputs,
+            regime_state,
+            lot_size):
+
+        self.writer.upload_regime_state(
+            stock_id=regime_state["underlying"],
+            option_chains=option_chains,
+            spot_snapshot=spot_history,
+            strategy_outputs=strategy_outputs,
+            regime_state=regime_state,
+            lot_size=lot_size)

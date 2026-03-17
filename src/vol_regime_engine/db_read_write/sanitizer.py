@@ -27,6 +27,10 @@ def sanitize(obj):
     if isinstance(obj, list):
         return [sanitize(v) for v in obj]
 
+    # 🔥 FIX: handle custom classes like RegimeScoreResult
+    if hasattr(obj, "__dict__"):
+        return sanitize(obj.__dict__)
+
     return obj
 
 
@@ -34,3 +38,17 @@ def clean_scalar(x):
     if pd.isna(x) or np.isinf(x):
         return None
     return float(x)
+
+
+def sanitize_keys(obj):
+    if isinstance(obj, dict):
+        new_dict = {}
+        for k, v in obj.items():
+            # convert key to string + remove illegal chars
+            new_key = str(k).replace(".", "_").replace("$", "").replace("#", "").replace("[", "").replace("]", "").replace("/", "_")
+            new_dict[new_key] = sanitize_keys(v)
+        return new_dict
+    elif isinstance(obj, list):
+        return [sanitize_keys(i) for i in obj]
+    else:
+        return obj
