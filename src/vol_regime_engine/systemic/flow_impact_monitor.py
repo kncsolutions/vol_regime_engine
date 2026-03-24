@@ -137,6 +137,7 @@ class FlowImpactMonitor:
 
         BPR = abs(k * Q) / sigma_p
 
+
         return k, BPR
 
     # --------------------------------------------------

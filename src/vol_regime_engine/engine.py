@@ -89,6 +89,8 @@ class VolRegimeEngine:
                 self.db_cred,
                 self.db_path
             )
+        else:
+            self.db_cred = False
 
         # Logging
         self.enable_logging = enable_logging
@@ -345,6 +347,9 @@ class VolRegimeEngine:
 
             flow_monitor = FlowImpactMonitor()
 
+
+
+
             flow_result = flow_monitor.evaluate(
                 FlowImpactInputs(
                     net_gex=local_net_gex,
@@ -469,10 +474,13 @@ class VolRegimeEngine:
         # ---------------------------------------
         future_keys = []
         futures_engine = FuturesStateEngine()
+        print(future_ohlc)
         for expiry, tf_dict in future_ohlc.items():
             for tf, df in tf_dict.items():
                 key = f"{"Future"}_{expiry}_{tf}"
                 future_keys.append(key)
+                print(type(df))
+                print(df)
                 state[key] = self.compute_future_regime(df, gamma_surface)
 
         # ---------------------------------------

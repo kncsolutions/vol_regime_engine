@@ -22,6 +22,8 @@ class FirebaseMetricWriter:
 
         self.root_ref = db.reference("/")
 
+
+
     def upload_metrics(
             self,
             stock_id: str,
@@ -41,11 +43,41 @@ class FirebaseMetricWriter:
             option_chain: pd.DataFrame
     ):
         timestamp = int(datetime.now(timezone.utc).timestamp())
-
         ts = str(timestamp)
 
-        ref = self.root_ref.child("vol-regime-metrics").child(stock_id).child('metrics').child(ts)
+        # ---------- BASE REF ----------
+        metrics_ref = self.root_ref.child("vol-regime-metrics").child(stock_id).child('metrics').child(ts)
+
         print(f"Uploading to: vol-regime-metrics/{stock_id}/{ts}")
+
+        # ---------- COMPUTE GAMMA EXPLOSION ----------
+        explosion_score = None
+
+        try:
+            if isinstance(option_chain, pd.DataFrame):
+                chain_records = option_chain.to_dict(orient="records")
+            else:
+                chain_records = option_chain
+
+            gex = [o["net_gex"] for o in chain_records if o.get("net_gex") is not None]
+
+            if len(gex) >= 3:
+                gradient = np.gradient(gex)
+                explosion_score = float(np.max(gradient ** 2))
+            else:
+                explosion_score = 0.0
+
+        except Exception as e:
+            print("Explosion calc error:", stock_id, e)
+            explosion_score = 0.0
+
+        # ---------- UPDATE GAMMA ZONES ----------
+        if not gamma_zones:
+            gamma_zones = {}
+
+        gamma_zones["gamma_explosion_score"] = explosion_score
+
+        # ---------- BUILD PAYLOAD ----------
         payload = {
             "timestamp": ts,
             "stock_id": stock_id,
@@ -62,19 +94,39 @@ class FirebaseMetricWriter:
             "gamma_zones": gamma_zones,
             "fragility_score": fragility_score,
             "lot_size": lot_size,
-            "option_chain": option_chain
+            "option_chain": chain_records
         }
 
         payload = sanitize(payload)
-        # import json
-        # try:
-        #     json.dumps(payload, allow_nan=False)
-        # except ValueError as e:
-        #     print("Payload contains invalid number:")
-        #     print(payload)
-        #     raise e
 
-        ref.set(payload)
+        # ---------- WRITE HISTORICAL ----------
+        metrics_ref.set(payload)
+
+        # ============================================================
+        # 🔥 NEW: UPDATE LATEST SNAPSHOT
+        # ============================================================
+        latest_ref = self.root_ref.child("latest-vol-regime-metrics").child(stock_id)
+        latest_ref.set(payload)
+
+        # ============================================================
+        # 🔥 NEW: UPDATE FLIPZONE NODE
+        # ============================================================
+        flipzone_ref = self.root_ref.child("flipzone-latest")
+
+        if spot and gamma_flip:
+            distance = (spot - gamma_flip) / gamma_flip * 100
+
+            if abs(distance) <= 2:
+                flipzone_ref.child(stock_id).set({
+                    "distance": distance,
+                    "gamma_explosion_score": explosion_score,
+                    "timestamp": ts
+                })
+            else:
+                # remove if no longer in flipzone
+                flipzone_ref.child(stock_id).delete()
+
+        print(f"✅ Updated latest + flipzone for {stock_id}")
 
     def upload_regime_state(
             self,
