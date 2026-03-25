@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import pandas as pd
 import numpy as np
 from .sanitizer import sanitize, clean_scalar, sanitize_keys
+from pymongo import MongoClient
 
 
 class FirebaseMetricWriter:
@@ -22,7 +23,39 @@ class FirebaseMetricWriter:
 
         self.root_ref = db.reference("/")
 
+        # =========================
+        # 🔥 NEW: MongoDB INIT
+        # =========================
+        self.mongo_client = MongoClient("mongodb://localhost:27017/")
+        self.mongo_db = self.mongo_client["volatility_db"]
 
+        self.metrics_collection = self.mongo_db["vol_regime_metrics"]
+        self.latest_collection = self.mongo_db["latest_vol_regime_metrics"]
+        self.flipzone_collection = self.mongo_db["flipzone_latest"]
+        self.states_collection = self.mongo_db["vol_regime_states"]
+
+        # =========================
+        # 🔥 CREATE INDEXES (HERE)
+        # =========================
+        # self._ensure_indexes()
+
+    def _ensure_indexes(self):
+        print("⚡ Ensuring MongoDB indexes...")
+
+        self.metrics_collection.create_index(
+            [("stock_id", 1), ("timestamp", -1)]
+        )
+
+        self.states_collection.create_index(
+            [("stock_id", 1), ("timestamp", -1)]
+        )
+
+        self.latest_collection.create_index(
+            "stock_id", unique=True
+        )
+
+        self.flipzone_collection.create_index(
+            "stock_id", unique=True)
 
     def upload_metrics(
             self,
@@ -98,15 +131,63 @@ class FirebaseMetricWriter:
         }
 
         payload = sanitize(payload)
+        mongo_payload = payload.copy()
+        firebase_payload = payload.copy()
 
         # ---------- WRITE HISTORICAL ----------
-        metrics_ref.set(payload)
+        metrics_ref.set(firebase_payload)
+
+        # =========================
+        # 🔥 Mongo: Historical Insert
+        # =========================
+        try:
+            timestamp = payload["timestamp"]
+
+            clean_payload = payload.copy()
+
+
+            result = self.metrics_collection.update_one(
+                {"_id": stock_id},
+                {
+                    "$set": {
+                        f"data.metrics.{timestamp}": clean_payload
+                    }
+                },
+                upsert=True
+            )
+
+
+        except Exception as e:
+            print("❌ Mongo ERROR:", e)
+            raise e  # <-- ADD THIS
+
 
         # ============================================================
         # 🔥 NEW: UPDATE LATEST SNAPSHOT
         # ============================================================
         latest_ref = self.root_ref.child("latest-vol-regime-metrics").child(stock_id)
-        latest_ref.set(payload)
+        print("DEBUG: deleting existing latest node")
+        latest_ref.delete()
+
+        print("DEBUG: writing fresh latest node")
+        latest_ref.set(firebase_payload)
+
+        print("SUCCESS after delete")
+
+
+        try:
+            clean_payload = payload.copy()
+            clean_payload.pop("_id", None)
+            self.latest_collection.delete_one({"_id": clean_payload["stock_id"]})
+
+            result = self.latest_collection.update_one(
+                {"_id": stock_id},
+                {"$set": clean_payload},
+                upsert=True
+            )
+            print("Matched:", result.matched_count, "Modified:", result.modified_count)
+        except Exception as e:
+            print("Mongo latest update error:", e)
 
         # ============================================================
         # 🔥 NEW: UPDATE FLIPZONE NODE
@@ -117,16 +198,37 @@ class FirebaseMetricWriter:
             distance = (spot - gamma_flip) / gamma_flip * 100
 
             if abs(distance) <= 2:
-                flipzone_ref.child(stock_id).set({
+                flip_payload = {
+                    "stock_id": stock_id,
                     "distance": distance,
                     "gamma_explosion_score": explosion_score,
                     "timestamp": ts
-                })
+                }
+                firebase_flip_payload = flip_payload.copy()
+                mongo_flip_payload = flip_payload.copy()
+
+                flipzone_ref.child(stock_id).set(firebase_flip_payload)
+
+                # Mongo upsert
+                try:
+                    self.flipzone_collection.update_one(
+                        {"stock_id": stock_id},
+                        {"$set": flip_payload},
+                        upsert=True
+                    )
+                except Exception as e:
+                    print("Mongo flipzone update error:", e)
+
             else:
-                # remove if no longer in flipzone
                 flipzone_ref.child(stock_id).delete()
 
+                # Mongo delete
+                self.flipzone_collection.delete_one({"stock_id": stock_id})
+
+
         print(f"✅ Updated latest + flipzone for {stock_id}")
+
+
 
     def upload_regime_state(
             self,
@@ -169,4 +271,19 @@ class FirebaseMetricWriter:
         #     print(payload)
         #     raise e
         ref.set(payload)
-
+        # =========================
+        # 🔥 Mongo Insert
+        # =========================
+        try:
+            self.states_collection.insert_one(payload)
+            self.states_collection.update_one(
+                {"_id": stock_id},
+                {
+                    "$set": {
+                        f"data.states.{timestamp}": payload
+                    }
+                },
+                upsert=True
+            )
+        except Exception as e:
+            print("Mongo states insert error:", e)
